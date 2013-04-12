@@ -1,0 +1,160 @@
+#!/bin/bash
+# Dakota Site Files Backup version 1.1
+
+# This script will take every site folder in /var/www and tar bzip it as an archive, then
+#+ store the tarball in a save directory
+#
+# @author Benjamin Bengfort
+# @created 2011-01-21 10:03:00 -400
+# @version 1.1 
+
+#
+# Set executable paths:
+#
+TAR=$(which tar)                    # Silly, but hey, we need to tar
+MKDIR=$(which mkdir)                # Silly, but hey, we need to make a directory
+BZIP=$(which bzip2)                 # Location of bzip2 compression
+
+#
+# Set important paths:
+#
+SAVE_DIR="$HOME/sitebackup/files"                   # Location to save all dir.tar.bz2 files 
+HTDOCS_DIR="/var/www"                               # Location of sitefiles
+HTTPD_CONF_DIR="/etc/apache2/sites-available/"      # Location of apache configuration files
+
+#
+# Codes
+#
+ROOT_UID=0                      # Only users with $UID 0 have root privileges
+E_NOTROOT=87                    # Non-root exit error.
+
+# Ensure root user is doing the backup
+if [ "$UID" -ne "$ROOT_UID" ]; then
+    echo "Backup may require root permission to get stuff from directories"
+    exit $E_NOTROOT
+fi
+
+# A function that pads a string to center it.
+# Param 1 is the word or string to center (default blank string)
+# Param 2 is the length of the final string (default length of param 1)
+# Param 3 is the character to use as padding (default ' ')
+center() {
+    if [ "$1" ]; then
+        word="$1";
+    else
+        word="";
+    fi;
+
+    if [ "$2" ]; then
+        len=$(($2));
+    else
+        len=${#word};
+    fi;
+
+    if [ "$3" ]; then
+        padding="$3";
+    else
+        padding=" ";
+    fi;
+
+    while [ ${#word} -lt $len ]; do
+        word="$word$padding";
+        if [ ${#word} -lt $len ]; then
+            word="$padding$word"
+        fi;
+    done;
+    echo "$word";
+}
+
+# A function that prints out the banner text.
+banner()
+{
+    BTEXT="Backing up Site Files on $(hostname)"
+    echo -e $(center '' 50 +)
+    echo -e "|$(center "$BTEXT" 48)|"
+    echo -e $(center '' 50 +)    
+}
+
+
+# Pass a directory as an argument, if it doesn't exist, it will make it
+# Ensures that the storage location always exists. 
+ifNotDir_mkdir()
+{
+    
+    if [ ! -d "$1" ]; then
+        $MKDIR -p $1
+    fi
+}
+
+# Takes a sitename that is a dir name in $HTDOCS_DIR as an argument; tars that directory,
+# then grabs the apache configurationf vhost.d file (or sites-available) by grep'ing for
+# the sitename and sticks it into the tarball. Lastly, it bzips it for compression.
+# The name is short for tarball the site.  
+tbsite()
+{
+    # Get argument, should be a DIR name in $HTDOCS_DIR
+    DIR=$1
+    echo -e "Backing up $HTDOCS_DIR/$DIR/htdocs/ to $SAVE_DIR/$DIR.tar.bz2 ..."
+    # Go into $HTDOCS_DIR so we don't have to worry about the full path in the tarball... 
+    cd $HTDOCS_DIR
+    # Tar that up, but don't compress it! 
+    $TAR -cf $SAVE_DIR/$DIR.tar $DIR
+    # Grep for the configuration file, should be similar to the $DIR arg
+    CONF=$(ls $HTTPD_CONF_DIR | grep $DIR)
+    if [ "$CONF" != "" ]; then
+        # If we found a configuration file, then go to the conf dir (absolute paths again) and tar it.
+        cd $HTTPD_CONF_DIR
+		cp $CONF $CONF.conf
+        $TAR -rf $SAVE_DIR/$DIR.tar $CONF.conf
+		rm $CONF.conf
+    fi
+    # Compress the archive
+	if [ -e "$SAVE_DIR/$DIR.tar.bz2" ]; then
+		# If previous version of the backup exists, we need to delete it to allow bz2 to update it.
+		rm $SAVE_DIR/$DIR.tar.bz2
+	fi
+    $BZIP -f $SAVE_DIR/$DIR.tar
+	# Clean up
+	if [ -e "$SAVE_DIR/$DIR.tar" ]; then
+		# If bzip2 left the tar file there, then clean that up
+		rm $SAVE_DIR/$DIR.tar
+	fi
+}
+
+# Gets a list of the directories in $HTDOCS_DIR. There should be one directory per site on
+# your server (not to be polemic). It then passes every directory to tbsite for archiving. 
+backup()
+{
+    echo -e "Be patient, this could take a long time!"
+    SITES=$(ls $HTDOCS_DIR)
+    for SITE in $SITES
+    do
+        tbsite $SITE
+    done
+}
+
+# Just to be smart, a main function rather than just putting this all at the top level. 
+main()
+{
+    # Print out banner
+    banner
+    # Check if SAVE_DIR exists, make it if it doesn't
+    ifNotDir_mkdir $SAVE_DIR
+    # Check if the HTDOCS_DIR exists, otherwise exit with issues
+    if [ -d "$HTDOCS_DIR" ]; then
+        # Check if HTTPD_CONF_DIR exists, otherwise exit with issues
+        if [ -d "$HTTPD_CONF_DIR" ]; then
+            # Commence backup
+            backup
+        else
+            echo -e "ERROR $HTTPD_CONF_DIR doesn't exist"
+            exit 1
+        fi
+    else
+        echo -e "ERROR $HTDOCS_DIR doesn't exist"
+        exit 1
+    fi 
+    
+}
+
+main

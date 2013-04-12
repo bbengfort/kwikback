@@ -1,0 +1,151 @@
+#!/bin/bash
+# Database Backup version 1.2
+
+# This script will take every database in MySQL and dump it to compressed
+#+ bakup SQL structure. 
+#
+# @author Benjamin Bengfort
+# @created 2011-01-21 10:03:00 -400
+# @version 1.2
+
+#
+# Set executable paths:
+#
+MYSQL=$(which mysql)                # Location of mysql command for executing queries
+MYSQLDUMP=$(which mysqldump)        # Location of mysqldump command for backup
+MKDIR=$(which mkdir)                # Silly, but hey, we need to make a directory
+BZIP2=$(which bzip2)                # Use BZIP2 as compression 
+
+#
+# Set important paths:
+#
+SAVE_DIR="$HOME/sitebackup/mysql"        # Location to save all database.bak.sql.bz2 files 
+
+#
+# Set strings:
+#
+DBRESWDS=('Database' 'information_schema' 'mysql' 'test', 'performance_schema')       # Words/Databases we shouldn't backup
+
+# A function that pads a string to center it.
+# Param 1 is the word or string to center (default blank string)
+# Param 2 is the length of the final string (default length of param 1)
+# Param 3 is the character to use as padding (default ' ')
+center() {
+    if [ "$1" ]; then
+        word="$1";
+    else
+        word="";
+    fi;
+
+    if [ "$2" ]; then
+        len=$(($2));
+    else
+        len=${#word};
+    fi;
+
+    if [ "$3" ]; then
+        padding="$3";
+    else
+        padding=" ";
+    fi;
+
+    while [ ${#word} -lt $len ]; do
+        word="$word$padding";
+        if [ ${#word} -lt $len ]; then
+            word="$padding$word"
+        fi;
+    done;
+    echo "$word";
+}
+
+# A function that prints out the banner text.
+banner()
+{
+    BTEXT="Backing up MySQL on $(hostname)"
+    echo -e $(center '' 50 +)
+    echo -e "|$(center "$BTEXT" 48)|"
+    echo -e $(center '' 50 +)    
+}
+
+
+# Pass a directory as an argument, if it doesn't exist, it will make it
+# Ensures that the storage location always exists. 
+ifNotDir_mkdir()
+{
+    
+    if [ ! -d "$1" ]; then
+        $MKDIR -p $1
+    fi
+}
+
+# Pass a value as the first argument, an array as the second arg (use array[@] syntax)
+# Checks if arg1 is in the array, and sets a global value, $INARRAY as true or false for testing
+inarray()
+{
+    VAL=$1
+    declare -a ARY=("${!2}")
+    INARRAY=false
+    for ITM in ${ARY[@]}
+    do
+        if [ "$VAL" == "$ITM" ]; then
+            INARRAY=true
+            break
+        fi
+    done
+}
+
+# Get MySQL Access information with prompt (and passwords hidden)
+getAccessInfo()
+{
+    # Get MySQL Username for access to the database
+    read -p 'Enter MySQL username: ' USER 
+    # Get MySQL Password for access to the database
+    read -p 'Enter MySQL user password: ' -s PASS
+}
+
+# Test authentication of username and password by selecting the databases in MySQL, any
+# ERROR authentication failure will cause the loop to go round again. Handily, this
+# function also collects the databases that we will need to back up! 
+authenticateMySQL()
+{
+    while true
+    do
+        getAccessInfo
+        DATABASES=$($MYSQL -u $USER --password=$PASS -e 'show databases')
+        if [ "$DATABASES" != "" ]; then
+            echo -e -n '\n'
+            break
+        fi
+    done
+}
+
+# Carries out the tough work of the backup in this function by iterating through every
+# database collected by the authenticateMySQL function, checking to see if it is one of the
+# reserved words, and if it isn't MYSQLDUMPS it to a compressed backup file in the save path
+backup()
+{
+    ifNotDir_mkdir $SAVE_DIR
+    for DB in $DATABASES
+    do
+        inarray $DB DBRESWDS[@]
+        if $INARRAY ; then
+            continue
+        else
+            echo "Backing up $DB to $SAVE_DIR/$DB.bak.sql.bz2 ..."
+            $MYSQLDUMP --add-drop-table -h localhost -u $USER --password=$PASS $DB | $BZIP2 -c > $SAVE_DIR/$DB.bak.sql.bz2
+        fi
+    done
+}
+
+# Just to be smart, a main function rather than just putting this all at the top level. 
+main()
+{
+    # Print out banner
+    banner
+    # Check MySQL authentication
+    authenticateMySQL
+    # Commence backup
+    backup
+}
+
+main
